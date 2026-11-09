@@ -160,17 +160,18 @@ export class GestureUI {
     };
 
     // Wire HandTracker Callbacks
+    this.handTracker.onStatusChange = (status) => this.updateTrackingStatus(status);
     this.handTracker.onHandDetected = (landmarks) => {
       this.gestureController.processLandmarks(landmarks);
       if (this.cameraManager.isActive) {
-        this.updateTrackingStatus('Tracking');
+        this.updateTrackingStatus('Hand detected');
       }
     };
 
     this.handTracker.onHandLost = () => {
       this.gestureController.handleHandLost();
       if (this.cameraManager.isActive) {
-        this.updateTrackingStatus('Waiting');
+        this.updateTrackingStatus('Waiting for hand');
       }
       this.hideVirtualCursor();
     };
@@ -241,7 +242,6 @@ export class GestureUI {
   }
 
   updateTrackingStatus(status) {
-    // Statuses: 'Waiting' | 'Tracking' | 'Gesture detected' | 'Camera unavailable' | 'Camera off'
     if (!this.elements.statusBadge || !this.elements.statusText) return;
 
     this.elements.statusText.textContent = status;
@@ -249,18 +249,24 @@ export class GestureUI {
 
     switch (status) {
       case 'Tracking':
+      case 'Hand detected':
         this.elements.statusBadge.classList.add('status-tracking');
         break;
       case 'Gesture detected':
         this.elements.statusBadge.classList.add('status-gesture');
         break;
       case 'Waiting':
+      case 'Waiting for hand':
+      case 'Loading model':
         this.elements.statusBadge.classList.add('status-waiting');
         break;
       case 'Camera unavailable':
+      case 'Tracking unavailable':
         this.elements.statusBadge.classList.add('status-unavailable');
         break;
       case 'Camera off':
+      case 'Camera disabled':
+      case 'Disabled':
       default:
         this.elements.statusBadge.classList.add('status-off');
         break;
