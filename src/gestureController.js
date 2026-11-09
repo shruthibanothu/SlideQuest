@@ -1,8 +1,8 @@
 /**
  * SlideQuest - Gesture Controller
- * Implements Mode A (Directional Index-Finger Movement) with full safeguards,
- * velocity filtering, multi-frame stability, diagonal rejection, neutral reset,
- * cooldowns, and animation locks.
+ * Implements Mode A (Directional Index-Finger Movement) and Mode B (Virtual Pinch-and-Drag)
+ * with full safeguards, hysteresis, velocity filtering, multi-frame stability,
+ * neutral reset, cooldowns, and animation locks.
  *
  * Privacy & Security Guarantee:
  * - Landmark analysis is performed purely in volatile memory.
@@ -13,7 +13,7 @@ export class GestureController {
   constructor(game, options = {}) {
     this.game = game;
 
-    // Control Modes: 'OFF' | 'MODE_A' (Directional) | 'MODE_B' (Pinch & Drag - Phase 5)
+    // Control Modes: 'OFF' | 'MODE_A' (Directional) | 'MODE_B' (Pinch & Drag)
     this.mode = options.initialMode || 'OFF';
 
     // Configurable thresholds & calibration
@@ -21,18 +21,18 @@ export class GestureController {
       mirrorX: options.mirrorX !== undefined ? options.mirrorX : true,
 
       // Mode A: Directional Swipe Settings
-      swipeThreshold: options.swipeThreshold || 0.11, // Minimum normalized displacement (0.0 to 1.0)
+      swipeThreshold: options.swipeThreshold || 0.11, // Minimum normalized displacement
       velocityThreshold: options.velocityThreshold || 0.00035, // Minimum normalized units per ms
-      neutralRadius: options.neutralRadius || 0.08, // Radius to return to before next swipe can trigger
+      neutralRadius: options.neutralRadius || 0.08, // Radius to return to before next swipe
       maxGestureDurationMs: 800, // Maximum duration for a quick deliberate swipe stroke
       cooldownMs: 320, // Lockout duration after executing a move
       minStableFrames: 3, // Consecutive frames required before evaluating motion
-      axisDominanceRatio: 1.45, // Ratio of primary to secondary axis displacement to reject diagonals
+      axisDominanceRatio: 1.45, // Ratio of primary to secondary axis to reject diagonals
 
-      // Mode B Settings (Phase 5 reserved)
-      pinchThreshold: options.pinchThreshold || 0.065,
-      releaseThreshold: options.releaseThreshold || 0.095,
-      cursorSmoothing: options.cursorSmoothing || 0.65,
+      // Mode B: Pinch & Drag Settings
+      pinchThreshold: options.pinchThreshold || 0.065, // Distance threshold to trigger pinch
+      releaseThreshold: options.releaseThreshold || 0.095, // Hysteresis threshold to release pinch
+      cursorSmoothing: options.cursorSmoothing || 0.65, // EMA alpha for cursor smoothing
 
       minConfidence: 0.55
     };
@@ -42,20 +42,21 @@ export class GestureController {
     this.cooldownTimer = null;
 
     // Mode A internal state machine
-    // 'NEUTRAL' -> 'TRACKING_SWIPE' -> 'TRIGGERED' -> 'AWAITING_NEUTRAL'
-    this.modeAState = 'NEUTRAL';
-    this.modeAAnchor = null; // { x, y, time }
+    this.modeAState = 'NEUTRAL'; // 'NEUTRAL' | 'SWIPING' | 'TRIGGERED' | 'AWAITING_NEUTRAL'
+    this.modeAAnchor = null;
     this.stableFrameCount = 0;
 
-    // Mode B internal state (Phase 5)
-    this.modeBState = 'IDLE';
+    // Mode B internal state machine
+    this.modeBState = 'IDLE'; // 'IDLE' | 'DRAGGING'
     this.isPinched = false;
     this.draggedTileIndex = null;
+    this.isCursorInitialized = false;
     this.smoothedCursor = { x: 0.5, y: 0.5 };
     this.rawNormalizedCursor = { x: 0.5, y: 0.5 };
 
-    // Reference to DOM element for board coordinate mapping
+    // Reference to DOM element or mock bounds for board coordinate mapping
     this.boardElement = null;
+    this.boardBounds = options.boardBounds || null;
 
     // Event callbacks
     this.onGestureDetected = options.onGestureDetected || (() => {});
@@ -82,12 +83,16 @@ export class GestureController {
     this.boardElement = element;
   }
 
+  setBoardBounds(bounds) {
+    this.boardBounds = bounds;
+  }
+
   updateConfig(newConfig) {
     Object.assign(this.config, newConfig);
   }
 
   /**
-   * Resets all internal gesture states (e.g. when mode switches or hand disappears)
+   * Resets all internal gesture states (e.g. when mode switches, hand disappears, or new game starts)
    */
   resetState() {
     this.modeAState = 'NEUTRAL';
@@ -100,6 +105,7 @@ export class GestureController {
     this.isPinched = false;
     this.modeBState = 'IDLE';
     this.draggedTileIndex = null;
+    this.isCursorInitialized = false;
 
     if (this.cooldownTimer) {
       clearTimeout(this.cooldownTimer);
@@ -128,14 +134,19 @@ export class GestureController {
     if (!indexTip) return;
 
     // Coordinate mapping with mirror support
-    // In mirrored mode (standard selfie video), moving physical hand right moves screen finger right.
     const currentX = this.config.mirrorX ? (1 - indexTip.x) : indexTip.x;
     const currentY = indexTip.y;
 
-    // Exponential Moving Average cursor smoothing
-    const alpha = this.config.cursorSmoothing;
-    this.smoothedCursor.x = (this.smoothedCursor.x * (1 - alpha)) + (currentX * alpha);
-    this.smoothedCursor.y = (this.smoothedCursor.y * (1 - alpha)) + (currentY * alpha);
+    // Exponential Moving Average cursor smoothing (prevent jump on first frame)
+    if (!this.isCursorInitialized) {
+      this.smoothedCursor.x = currentX;
+      this.smoothedCursor.y = currentY;
+      this.isCursorInitialized = true;
+    } else {
+      const alpha = this.config.cursorSmoothing;
+      this.smoothedCursor.x = (this.smoothedCursor.x * (1 - alpha)) + (currentX * alpha);
+      this.smoothedCursor.y = (this.smoothedCursor.y * (1 - alpha)) + (currentY * alpha);
+    }
     this.rawNormalizedCursor = { x: currentX, y: currentY };
 
     this.onCursorUpdate({
@@ -145,7 +156,7 @@ export class GestureController {
       mode: this.mode
     });
 
-    // Safeguard: Lock input during active tile animation or gesture cooldown
+    // Safeguard: Lock gesture execution during active tile animation or cooldown
     if (this.game && this.game.isAnimating) {
       return;
     }
@@ -175,7 +186,6 @@ export class GestureController {
    * ========================================================================= */
 
   processModeA(currentX, currentY, now) {
-    // State 1: Awaiting return to neutral position
     if (this.modeAState === 'AWAITING_NEUTRAL') {
       if (this.modeAAnchor) {
         const dx = currentX - this.modeAAnchor.x;
@@ -197,7 +207,6 @@ export class GestureController {
       return;
     }
 
-    // State 2: Neutral origin establish
     if (this.modeAState === 'NEUTRAL') {
       this.modeAAnchor = { x: currentX, y: currentY, time: now };
       this.modeAState = 'SWIPING';
@@ -205,21 +214,16 @@ export class GestureController {
       return;
     }
 
-    // State 3: Tracking active swipe
     if (this.modeAState === 'SWIPING') {
       this.stableFrameCount++;
-
       const dt = now - this.modeAAnchor.time;
 
-      // Timeout check: Slow or stationary finger movement is NOT a deliberate swipe
       if (dt > this.config.maxGestureDurationMs) {
-        // Reset anchor to current position to prevent slow drifting accumulations
         this.modeAAnchor = { x: currentX, y: currentY, time: now };
         this.stableFrameCount = 1;
         return;
       }
 
-      // Safeguard: Require minimum consecutive stable frames before evaluating swipe
       if (this.stableFrameCount < this.config.minStableFrames) {
         return;
       }
@@ -229,51 +233,40 @@ export class GestureController {
       const displacement = Math.hypot(dx, dy);
       const velocity = dt > 0 ? (displacement / dt) : 0;
 
-      // Stationary finger check: Discard small movements
       if (displacement < this.config.swipeThreshold) {
         return;
       }
 
-      // Velocity check: Discard slow movements
       if (velocity < this.config.velocityThreshold) {
         return;
       }
 
-      // Directional Classification with Diagonal Rejection:
-      // A valid swipe must have a clear dominant primary axis over the secondary axis.
       const absDx = Math.abs(dx);
       const absDy = Math.abs(dy);
-
       const maxAxis = Math.max(absDx, absDy);
       const minAxis = Math.min(absDx, absDy);
 
-      // If motion is diagonal (ratio < axisDominanceRatio), reject as ambiguous diagonal command
       if (minAxis > 0 && (maxAxis / minAxis) < this.config.axisDominanceRatio) {
         this.onStatusNotification({
           type: 'diagonal_rejected',
           message: 'Ambiguous diagonal motion rejected'
         });
-        // Reset anchor to prevent edge-case carryover
         this.modeAAnchor = { x: currentX, y: currentY, time: now };
         return;
       }
 
       let direction = null;
       if (absDx > absDy) {
-        // Horizontal: moving right (dx > 0) or left (dx < 0)
         direction = dx > 0 ? 'RIGHT' : 'LEFT';
       } else {
-        // Vertical: moving down (dy > 0) or up (dy < 0)
         direction = dy > 0 ? 'DOWN' : 'UP';
       }
 
-      // Deliberate gesture confirmed: Execute move through central game engine
       this.executeModeAGesture(direction);
     }
   }
 
   executeModeAGesture(direction) {
-    // Transition state: Require return to neutral before any subsequent gesture
     this.modeAState = 'AWAITING_NEUTRAL';
     this.startCooldown();
 
@@ -283,7 +276,6 @@ export class GestureController {
       timestamp: performance.now()
     });
 
-    // Pass gesture direction directly to central game engine
     const moveSuccess = this.game ? this.game.moveInDirection(direction) : false;
 
     this.onStatusNotification({
@@ -294,32 +286,173 @@ export class GestureController {
     });
   }
 
-  startCooldown(duration = this.config.cooldownMs) {
-    this.isCoolingDown = true;
-    if (this.cooldownTimer) clearTimeout(this.cooldownTimer);
-    this.cooldownTimer = setTimeout(() => {
-      this.isCoolingDown = false;
-      this.cooldownTimer = null;
-    }, duration);
+  /* =========================================================================
+   * MODE B: Virtual Pinch-and-Drag System
+   * ========================================================================= */
+
+  processModeB(indexTip, thumbTip, currentX, currentY, now) {
+    if (!thumbTip || !indexTip) return;
+
+    // Calculate normalized Euclidean distance between thumb and index tips
+    const dx = thumbTip.x - indexTip.x;
+    const dy = thumbTip.y - indexTip.y;
+    const dz = (thumbTip.z || 0) - (indexTip.z || 0);
+    const pinchDistance = Math.hypot(dx, dy, dz);
+
+    const wasPinched = this.isPinched;
+
+    // Pinch Hysteresis:
+    // If not pinched: distance must be <= pinchThreshold (0.065) to begin pinch
+    // If pinched: distance must be >= releaseThreshold (0.095) to release pinch
+    if (!this.isPinched) {
+      if (pinchDistance <= this.config.pinchThreshold) {
+        this.isPinched = true;
+      }
+    } else {
+      if (pinchDistance >= this.config.releaseThreshold) {
+        this.isPinched = false;
+      }
+    }
+
+    if (this.isPinched !== wasPinched) {
+      this.onPinchStateChange({
+        isPinched: this.isPinched,
+        distance: pinchDistance
+      });
+    }
+
+    // Locate board target under the smoothed virtual cursor
+    const boardTarget = this.getBoardTargetAt(this.smoothedCursor.x, this.smoothedCursor.y);
+
+    // Event 1: Pinch Started (Grab attempt)
+    if (!wasPinched && this.isPinched) {
+      // Must be hovering over a valid numbered puzzle tile (empty cell cannot be selected)
+      if (boardTarget && boardTarget.type === 'tile') {
+        const tileIndex = boardTarget.index;
+        this.draggedTileIndex = tileIndex;
+        this.modeBState = 'DRAGGING';
+
+        this.onDragStart({
+          tileIndex,
+          tileValue: this.game.board[tileIndex],
+          cursor: { ...this.smoothedCursor },
+          isAdjacent: this.game ? this.game.canMoveTile(tileIndex) : false
+        });
+      }
+    }
+
+    // Event 2: Actively Dragging
+    if (this.isPinched && this.modeBState === 'DRAGGING' && this.draggedTileIndex !== null) {
+      this.onDragMove({
+        tileIndex: this.draggedTileIndex,
+        cursor: { ...this.smoothedCursor },
+        target: boardTarget,
+        isOverEmpty: Boolean(boardTarget && boardTarget.type === 'empty')
+      });
+    }
+
+    // Event 3: Pinch Released (Drop attempt)
+    if (wasPinched && !this.isPinched) {
+      if (this.modeBState === 'DRAGGING' && this.draggedTileIndex !== null) {
+        this.handleDragRelease(boardTarget);
+      }
+    }
   }
 
-  /* =========================================================================
-   * MODE B: Virtual Pinch-and-Drag (Phase 5 Placeholder / Architecture)
-   * ========================================================================= */
-  processModeB(indexTip, thumbTip, currentX, currentY, now) {
-    // Reserved for Phase 5 implementation
+  handleDragRelease(boardTarget) {
+    const tileIndex = this.draggedTileIndex;
+    this.modeBState = 'IDLE';
+    this.draggedTileIndex = null;
+
+    // Movement validation:
+    // Move is valid ONLY if player released pinch over the empty cell
+    // AND the selected tile is directly adjacent horizontally or vertically to the empty cell.
+    const isOverEmpty = Boolean(boardTarget && boardTarget.type === 'empty');
+    const isAdjacent = this.game ? this.game.canMoveTile(tileIndex) : false;
+
+    if (isOverEmpty && isAdjacent) {
+      // Valid move! Execute through central game engine
+      const moveSuccess = this.game.moveTile(tileIndex);
+      this.startCooldown();
+
+      this.onDragEnd({
+        tileIndex,
+        success: moveSuccess,
+        reason: 'valid_move'
+      });
+
+      this.onStatusNotification({
+        type: 'drag_success',
+        success: true,
+        message: 'Tile placed!'
+      });
+    } else {
+      // Invalid drop: cancel drag, restore original tile position, do not increment move count
+      const reason = !isOverEmpty ? 'not_over_empty' : 'not_adjacent';
+
+      this.onDragEnd({
+        tileIndex,
+        success: false,
+        reason
+      });
+
+      if (this.game && typeof this.game.onInvalidMove === 'function') {
+        this.game.onInvalidMove({
+          tileIndex,
+          emptyIndex: this.game.emptyIndex,
+          reason
+        });
+      }
+
+      this.onStatusNotification({
+        type: 'drag_cancelled',
+        success: false,
+        message: 'Drop cancelled'
+      });
+    }
   }
 
   cancelDrag(reason = 'cancelled') {
-    // Reserved for Phase 5 implementation
+    if (this.draggedTileIndex !== null) {
+      const tileIndex = this.draggedTileIndex;
+      this.draggedTileIndex = null;
+      this.modeBState = 'IDLE';
+      this.isPinched = false;
+
+      this.onDragEnd({
+        tileIndex,
+        success: false,
+        reason
+      });
+
+      this.onStatusNotification({
+        type: 'drag_cancelled',
+        success: false,
+        message: 'Drag cancelled'
+      });
+    }
   }
 
+  /**
+   * Maps normalized camera coordinates (0.0 - 1.0) to puzzle board element and tile indices
+   */
   getBoardTargetAt(normX, normY) {
-    if (!this.boardElement || !this.game) return null;
+    if (!this.game) return null;
 
-    const rect = this.boardElement.getBoundingClientRect();
-    const screenX = normX * window.innerWidth;
-    const screenY = normY * window.innerHeight;
+    let rect = null;
+    const screenWidth = typeof window !== 'undefined' ? window.innerWidth : 1000;
+    const screenHeight = typeof window !== 'undefined' ? window.innerHeight : 1000;
+
+    if (this.boardElement && typeof this.boardElement.getBoundingClientRect === 'function') {
+      rect = this.boardElement.getBoundingClientRect();
+    } else if (this.boardBounds) {
+      rect = this.boardBounds;
+    }
+
+    if (!rect) return null;
+
+    const screenX = normX * screenWidth;
+    const screenY = normY * screenHeight;
 
     if (
       screenX < rect.left ||
@@ -333,8 +466,13 @@ export class GestureController {
     const relX = screenX - rect.left;
     const relY = screenY - rect.top;
 
-    const cellWidth = rect.width / this.game.gridSize;
-    const cellHeight = rect.height / this.game.gridSize;
+    const boardWidth = rect.width || (rect.right - rect.left);
+    const boardHeight = rect.height || (rect.bottom - rect.top);
+
+    if (boardWidth <= 0 || boardHeight <= 0) return null;
+
+    const cellWidth = boardWidth / this.game.gridSize;
+    const cellHeight = boardHeight / this.game.gridSize;
 
     const col = Math.floor(relX / cellWidth);
     const row = Math.floor(relY / cellHeight);
@@ -353,6 +491,15 @@ export class GestureController {
       value: tileValue,
       type: tileValue === 0 ? 'empty' : 'tile'
     };
+  }
+
+  startCooldown(duration = this.config.cooldownMs) {
+    this.isCoolingDown = true;
+    if (this.cooldownTimer) clearTimeout(this.cooldownTimer);
+    this.cooldownTimer = setTimeout(() => {
+      this.isCoolingDown = false;
+      this.cooldownTimer = null;
+    }, duration);
   }
 
   destroy() {
