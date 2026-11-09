@@ -190,6 +190,8 @@ export class SlideQuestGame {
    * - RIGHT: The tile moves RIGHT into empty cell. Thus, the tile must be situated to the LEFT of empty cell.
    */
   getAdjacentTileInDirection(direction) {
+    if (!direction || typeof direction !== 'string') return null;
+
     const emptyRow = Math.floor(this.emptyIndex / this.gridSize);
     const emptyCol = this.emptyIndex % this.gridSize;
 
@@ -237,7 +239,8 @@ export class SlideQuestGame {
   moveTile(tileIndex) {
     if (this.gameState !== 'PLAYING') {
       if (this.gameState === 'IDLE') {
-        this.startNewGame();
+        this.gameState = 'PLAYING';
+        this.startTimer();
       } else {
         return false;
       }
@@ -328,6 +331,9 @@ export class SlideQuestGame {
       this.elapsedTime = Math.floor((Date.now() - this.startTime) / 1000);
       this.notifyState();
     }, 1000);
+    if (this.timerInterval && typeof this.timerInterval.unref === 'function') {
+      this.timerInterval.unref();
+    }
   }
 
   stopTimer() {
