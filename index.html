@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SlideQuest – Camera Hand Gesture Puzzle Adventure</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Top Bar / Header -->
+    <header class="game-header">
+      <div class="header-branding">
+        <h1 class="logo-title">SlideQuest</h1>
+        <p class="logo-subtitle">Camera Gesture Sliding Puzzle</p>
+      </div>
+
+      <!-- Live Game Stats -->
+      <div class="header-stats">
+        <div class="stat-pill">
+          <span class="stat-icon">⏱️</span>
+          <span class="stat-label">TIME</span>
+          <span id="stat-time" class="stat-value">00:00</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-icon">🎯</span>
+          <span class="stat-label">MOVES</span>
+          <span id="stat-moves" class="stat-value">0</span>
+        </div>
+      </div>
+
+      <!-- Game Controls Toolbar -->
+      <div class="header-toolbar">
+        <div class="toolbar-group">
+          <label for="select-difficulty" class="sr-only">Grid Size</label>
+          <select id="select-difficulty" class="game-select" title="Puzzle Difficulty">
+            <option value="3" selected>3 × 3 (Adventurer)</option>
+            <option value="4">4 × 4 (Champion)</option>
+            <option value="5">5 × 5 (Legendary)</option>
+          </select>
+
+          <label for="select-theme" class="sr-only">Artwork Theme</label>
+          <select id="select-theme" class="game-select" title="Puzzle Artwork">
+            <option value="0" selected>Dragon Citadel</option>
+            <option value="1">Enchanted Forest</option>
+            <option value="2">Cyber Nexus</option>
+            <option value="custom">Upload Custom...</option>
+          </select>
+          <input type="file" id="image-upload" accept="image/*" style="display: none;">
+        </div>
+
+        <div class="toolbar-group">
+          <button id="btn-toggle-numbers" class="tool-btn active" title="Toggle tile numbers">
+            🔢 Numbers
+          </button>
+          <button id="btn-toggle-mute" class="tool-btn" title="Toggle audio sound effects">
+            🔊 Sound
+          </button>
+          <button id="btn-new-game" class="tool-btn primary" title="Reshuffle new puzzle">
+            🔄 New Game
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Game Layout: Puzzle Arena + Gesture Control Side Panel -->
+    <main class="game-main">
+      <!-- Left/Main Area: Square Sliding Puzzle Board -->
+      <section class="puzzle-area">
+        <div class="board-wrapper">
+          <div id="puzzle-board" class="puzzle-board" aria-label="Sliding puzzle board">
+            <!-- Tiles rendered dynamically by engine -->
+          </div>
+          <!-- Gesture Directional Swipe Visual Arrow Overlay -->
+          <div id="gesture-arrow-indicator" class="gesture-arrow">
+            <div class="arrow-glyph"></div>
+          </div>
+        </div>
+
+        <div class="board-legend">
+          <span>Click, Tap, or use <strong>WASD / Arrow Keys</strong> to slide tiles.</span>
+        </div>
+      </section>
+
+      <!-- Right/Side Panel (Below on Mobile): Camera & Gesture Control Center -->
+      <aside id="gesture-panel" class="gesture-panel">
+        <div class="panel-header">
+          <div class="panel-title-wrap">
+            <h2 class="panel-title">Gesture Vision</h2>
+            <div id="tracking-status-badge" class="status-badge status-off">
+              <span class="status-dot"></span>
+              <span id="tracking-status-text">Camera off</span>
+            </div>
+          </div>
+          <div class="panel-actions">
+            <button id="btn-open-tutorial" class="icon-tool-btn" title="How to use Hand Gestures">
+              ❓ Tutorial
+            </button>
+            <button id="btn-open-calibration" class="icon-tool-btn" title="Gesture Calibration Settings">
+              ⚙️ Calibrate
+            </button>
+          </div>
+        </div>
+
+        <!-- Camera Controls -->
+        <div class="camera-actions-bar">
+          <button id="btn-toggle-camera" class="camera-toggle-btn">
+            <span>📷</span> Enable Camera
+          </button>
+        </div>
+
+        <!-- Mode Selector -->
+        <div class="gesture-mode-tabs">
+          <span class="mode-label">Control Mode:</span>
+          <div class="mode-btn-group">
+            <button id="btn-mode-off" class="mode-btn active-mode">Off</button>
+            <button id="btn-mode-a" class="mode-btn" title="Point and swipe index finger">Mode A: Swipe</button>
+            <button id="btn-mode-b" class="mode-btn" title="Pinch index + thumb and drag tile">Mode B: Pinch & Drag</button>
+          </div>
+        </div>
+
+        <!-- Live Camera View with Canvas Landmark Overlay -->
+        <div class="camera-preview-container">
+          <video id="camera-video" playsinline muted autoplay></video>
+          <canvas id="camera-canvas"></canvas>
+          <div class="preview-grid-overlay"></div>
+          <div class="preview-watermark">MediaPipe HandLandmarker</div>
+        </div>
+
+        <!-- Gesture Quick Instructions Card -->
+        <div class="gesture-instructions-card">
+          <div class="card-instruction">
+            <strong>Mode A (Swipe):</strong> Point with your index finger and flick UP, DOWN, LEFT, or RIGHT to slide a tile into the empty space.
+          </div>
+          <div class="card-instruction">
+            <strong>Mode B (Pinch & Drag):</strong> Hover over a tile, pinch your index and thumb together to grab, move to the empty cell, and open your fingers to drop!
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <!-- Virtual Hand Cursor (Positioned dynamically over viewport/board) -->
+    <div id="virtual-cursor" class="virtual-cursor" style="display: none;">
+      <div id="virtual-cursor-ring" class="cursor-ring"></div>
+      <div class="cursor-center"></div>
+      <div class="cursor-badge"></div>
+    </div>
+
+    <!-- Notification Toast Banner -->
+    <div id="gesture-toast" class="toast-banner">
+      <span class="toast-icon">✨</span>
+      <span id="gesture-toast-msg" class="toast-text">Camera ready</span>
+    </div>
+
+    <!-- Calibration Drawer / Modal -->
+    <div id="calibration-modal" class="modal-overlay">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3>⚙️ Gesture Sensitivity & Calibration</h3>
+          <button id="btn-close-calibration" class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-intro">Fine-tune tracking thresholds to fit your webcam distance and lighting.</p>
+          
+          <div class="form-row">
+            <label for="slider-swipe-sens">
+              Mode A Swipe Threshold
+              <span id="val-swipe-sens" class="val-tag">0.11</span>
+            </label>
+            <input type="range" id="slider-swipe-sens" min="0.05" max="0.25" step="0.01" value="0.11">
+            <span class="hint-text">Lower = easier to trigger swipes; Higher = rejects subtle motions.</span>
+          </div>
+
+          <div class="form-row">
+            <label for="slider-pinch-sens">
+              Mode B Pinch Close Threshold
+              <span id="val-pinch-sens" class="val-tag">0.065</span>
+            </label>
+            <input type="range" id="slider-pinch-sens" min="0.03" max="0.12" step="0.005" value="0.065">
+            <span class="hint-text">Distance between thumb & index tip to grab tile.</span>
+          </div>
+
+          <div class="form-row">
+            <label for="slider-release-sens">
+              Mode B Pinch Release Threshold (Hysteresis)
+              <span id="val-release-sens" class="val-tag">0.095</span>
+            </label>
+            <input type="range" id="slider-release-sens" min="0.07" max="0.16" step="0.005" value="0.095">
+            <span class="hint-text">Distance to release tile. Must exceed pinch threshold to prevent jitter.</span>
+          </div>
+
+          <div class="form-row-checkbox">
+            <input type="checkbox" id="chk-camera-mirror" checked>
+            <label for="chk-camera-mirror">Mirror Camera View (Front-Facing Selfie Mode)</label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Gesture Tutorial Modal -->
+    <div id="tutorial-modal" class="modal-overlay">
+      <div class="modal-card tutorial-card">
+        <div class="modal-header">
+          <h3>🎮 SlideQuest Hand Gesture Guide</h3>
+          <button id="btn-close-tutorial" class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body tutorial-body">
+          <div class="tutorial-grid">
+            <div class="tutorial-step">
+              <div class="step-badge">1</div>
+              <h4>Enable Camera</h4>
+              <p>Click <strong>Enable Camera</strong>. Your browser will ask for webcam permission. Video is processed purely in your browser—no video data is ever saved or sent over the network.</p>
+            </div>
+
+            <div class="tutorial-step">
+              <div class="step-badge">2</div>
+              <h4>Mode A: Directional Swipes</h4>
+              <p>Extend your index finger. Quickly flick your finger in the direction you want the tile to slide into the empty spot. Return to neutral before making another move.</p>
+              <div class="demo-diagram">👆 ➡️ 🎯</div>
+            </div>
+
+            <div class="tutorial-step">
+              <div class="step-badge">3</div>
+              <h4>Mode B: Pinch & Drag</h4>
+              <p>Position your fingertip cursor over an adjacent tile. Pinch your thumb and index together to grab. Drag to the glowing empty space and release your fingers to drop.</p>
+              <div class="demo-diagram">👌 🟦 ➡️ ⬛</div>
+            </div>
+
+            <div class="tutorial-step">
+              <div class="step-badge">4</div>
+              <h4>Standard Controls</h4>
+              <p>You can seamlessly click or tap tiles, or use arrow keys anytime without interrupting your gesture game!</p>
+            </div>
+          </div>
+
+          <div class="modal-actions">
+            <button id="btn-tutorial-start" class="tool-btn primary large">Got it! Let's Play</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Victory Celebration Modal -->
+    <div id="victory-modal" class="modal-overlay">
+      <div class="modal-card victory-card">
+        <div class="victory-header">
+          <div class="trophy-icon">🏆</div>
+          <h2>Quest Completed!</h2>
+          <p>You have restored the ancient picture puzzle!</p>
+        </div>
+        <div class="victory-stats">
+          <div class="v-stat">
+            <span class="v-label">Total Moves</span>
+            <span id="victory-moves" class="v-value">0</span>
+          </div>
+          <div class="v-stat">
+            <span class="v-label">Time Taken</span>
+            <span id="victory-time" class="v-value">00:00</span>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button id="btn-play-again" class="tool-btn primary large">Play Another Quest</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
