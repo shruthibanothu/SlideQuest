@@ -1,7 +1,12 @@
 /**
  * SlideQuest - Camera Manager
  * Manages webcam lifecycle, MediaDevices getUserMedia permissions,
- * video stream attachment, track disposal, and camera state notifications.
+ * video stream attachment, track disposal, concurrency protection, and camera state notifications.
+ *
+ * Privacy & Security Guarantee:
+ * - Camera access is ONLY requested upon explicit user interaction.
+ * - Video streams are processed purely client-side in volatile memory.
+ * - No video frames, biometric data, or landmarks are ever recorded, persisted, or transmitted.
  */
 
 export class CameraManager {
@@ -9,6 +14,7 @@ export class CameraManager {
     this.videoElement = null;
     this.mediaStream = null;
     this.isActive = false;
+    this.isRequesting = false;
     this.facingMode = options.facingMode || 'user'; // 'user' (front) or 'environment'
     this.idealWidth = options.width || 640;
     this.idealHeight = options.height || 480;
@@ -19,8 +25,11 @@ export class CameraManager {
     this.onError = options.onError || (() => {});
     this.onStatusChange = options.onStatusChange || (() => {});
 
+    // Bound listeners for precise cleanup
     this.boundHandleTrackEnded = this.handleTrackEnded.bind(this);
     this.boundHandleDeviceChange = this.handleDeviceChange.bind(this);
+    this.boundHandlePageUnload = this.handlePageUnload.bind(this);
+
     this.setupGlobalListeners();
   }
 
@@ -28,15 +37,16 @@ export class CameraManager {
     if (typeof navigator !== 'undefined' && navigator.mediaDevices) {
       navigator.mediaDevices.addEventListener('devicechange', this.boundHandleDeviceChange);
     }
-    // Clean up tracks when tab closes or refreshes
     if (typeof window !== 'undefined') {
-      window.addEventListener('beforeunload', () => this.stopCamera());
+      window.addEventListener('beforeunload', this.boundHandlePageUnload);
+      window.addEventListener('pagehide', this.boundHandlePageUnload);
     }
   }
 
   /**
    * Starts the camera stream and binds it to the video element.
    * Only called after explicit user consent (e.g. clicking "Enable Camera").
+   * Protected against concurrent invocations and duplicate stream leaks.
    */
   async startCamera(videoElement) {
     if (!videoElement) {
@@ -45,21 +55,38 @@ export class CameraManager {
       return false;
     }
 
-    this.videoElement = videoElement;
-
-    // If already active, stop existing stream first
-    if (this.isActive) {
-      this.stopCamera();
-    }
-
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      const err = new Error('Camera access is not supported by this browser.');
-      this.onError(err, 'Browser Not Supported');
-      this.onStatusChange('Camera unavailable');
+    // Concurrency lock: Prevent duplicate requests from rapid clicks
+    if (this.isRequesting) {
       return false;
     }
 
-    const constraints = {
+    // If stream is already active on this video element, avoid redundant restart
+    if (this.isActive && this.mediaStream && this.videoElement === videoElement) {
+      return true;
+    }
+
+    // Stop any existing stream before starting a new one
+    if (this.isActive || this.mediaStream) {
+      this.stopCamera();
+    }
+
+    this.videoElement = videoElement;
+    this.isRequesting = true;
+    this.onStatusChange('Requesting Permission');
+
+    if (
+      typeof navigator === 'undefined' ||
+      !navigator.mediaDevices ||
+      typeof navigator.mediaDevices.getUserMedia !== 'function'
+    ) {
+      this.isRequesting = false;
+      const err = new Error('Camera access is not supported by this browser or environment.');
+      this.onStatusChange('Camera unavailable');
+      this.onError(err, 'Browser Not Supported');
+      return false;
+    }
+
+    const optimalConstraints = {
       audio: false,
       video: {
         facingMode: this.facingMode,
@@ -70,12 +97,27 @@ export class CameraManager {
     };
 
     try {
-      this.onStatusChange('Waiting');
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(optimalConstraints);
+      } catch (primaryError) {
+        // Fallback for OverconstrainedError: Retry with relaxed constraints
+        if (primaryError.name === 'OverconstrainedError') {
+          console.warn('OverconstrainedError encountered; falling back to basic video constraints.');
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: { facingMode: this.facingMode }
+          });
+        } else {
+          throw primaryError;
+        }
+      }
+
       this.mediaStream = stream;
       this.isActive = true;
+      this.isRequesting = false;
 
-      // Monitor stream tracks for disconnection
+      // Monitor stream tracks for unexpected disconnection
       stream.getVideoTracks().forEach(track => {
         track.addEventListener('ended', this.boundHandleTrackEnded);
       });
@@ -84,21 +126,36 @@ export class CameraManager {
       this.videoElement.setAttribute('playsinline', 'true');
       this.videoElement.muted = true;
 
+      // Ensure video element has loaded its first frame
       await new Promise((resolve) => {
         if (this.videoElement.readyState >= 2) {
           resolve();
         } else {
-          this.videoElement.onloadeddata = () => resolve();
+          const onLoaded = () => {
+            this.videoElement.removeEventListener('loadeddata', onLoaded);
+            resolve();
+          };
+          this.videoElement.addEventListener('loadeddata', onLoaded);
+          // Fallback timeout in case loadeddata event is delayed in some environments
+          setTimeout(resolve, 500);
         }
       });
 
-      await this.videoElement.play();
+      if (typeof this.videoElement.play === 'function') {
+        try {
+          await this.videoElement.play();
+        } catch (playErr) {
+          // Handled gracefully if autoplay policy delays play
+          console.warn('Video play delayed:', playErr);
+        }
+      }
 
-      this.onStatusChange('Tracking');
+      this.onStatusChange('Active');
       this.onStreamReady(this.videoElement, stream);
       return true;
     } catch (error) {
       this.isActive = false;
+      this.isRequesting = false;
       this.mediaStream = null;
 
       let userFriendlyMessage = 'Failed to access camera.';
@@ -119,19 +176,26 @@ export class CameraManager {
   }
 
   /**
-   * Stops all active camera tracks and detaches stream
+   * Stops all active camera tracks and detaches the stream from the video element.
+   * Completely releases hardware resources.
    */
   stopCamera() {
+    this.isRequesting = false;
+
     if (this.mediaStream) {
       this.mediaStream.getTracks().forEach(track => {
         track.removeEventListener('ended', this.boundHandleTrackEnded);
-        track.stop();
+        if (typeof track.stop === 'function') {
+          track.stop();
+        }
       });
       this.mediaStream = null;
     }
 
     if (this.videoElement) {
-      this.videoElement.pause();
+      if (typeof this.videoElement.pause === 'function') {
+        this.videoElement.pause();
+      }
       this.videoElement.srcObject = null;
     }
 
@@ -139,7 +203,7 @@ export class CameraManager {
     this.isActive = false;
 
     if (wasActive) {
-      this.onStatusChange('Camera off');
+      this.onStatusChange('Disabled');
       this.onStreamStopped();
     }
   }
@@ -151,8 +215,7 @@ export class CameraManager {
   }
 
   handleDeviceChange() {
-    if (this.isActive) {
-      // Validate that camera is still accessible
+    if (this.isActive && navigator.mediaDevices && typeof navigator.mediaDevices.enumerateDevices === 'function') {
       navigator.mediaDevices.enumerateDevices().then(devices => {
         const hasVideo = devices.some(d => d.kind === 'videoinput');
         if (!hasVideo) {
@@ -160,6 +223,10 @@ export class CameraManager {
         }
       }).catch(() => {});
     }
+  }
+
+  handlePageUnload() {
+    this.stopCamera();
   }
 
   getVideoDimensions() {
@@ -177,5 +244,10 @@ export class CameraManager {
     if (typeof navigator !== 'undefined' && navigator.mediaDevices) {
       navigator.mediaDevices.removeEventListener('devicechange', this.boundHandleDeviceChange);
     }
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('beforeunload', this.boundHandlePageUnload);
+      window.removeEventListener('pagehide', this.boundHandlePageUnload);
+    }
+    this.videoElement = null;
   }
 }
