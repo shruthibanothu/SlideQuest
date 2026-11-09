@@ -890,6 +890,20 @@ body {
   margin-top: 8px;
 }
 
+.modal-actions-split {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.tutorial-dont-show {
+  margin: 10px 0 6px 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
 .tool-btn.large {
   padding: 12px 28px;
   font-size: 0.95rem;

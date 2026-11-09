@@ -1,8 +1,20 @@
 /**
  * SlideQuest - Gesture UI & Interaction Presenter
  * Manages the camera preview side-panel, virtual cursor, visual highlights,
- * status badge, interactive calibration drawer, and gesture tutorial modal.
+ * status badge, interactive calibration drawer, LocalStorage persistence,
+ * and first-time gesture tutorial modal.
  */
+
+const DEFAULT_CALIBRATION = {
+  swipeThreshold: 0.11,
+  pinchThreshold: 0.065,
+  releaseThreshold: 0.095,
+  mirrorX: true,
+  mode: 'OFF'
+};
+
+const STORAGE_KEY_CALIBRATION = 'slidequest_calibration_v1';
+const STORAGE_KEY_TUTORIAL_SEEN = 'slidequest_tutorial_dismissed_v1';
 
 export class GestureUI {
   constructor(options = {}) {
@@ -18,7 +30,9 @@ export class GestureUI {
     this.toastTimeout = null;
 
     this.initDOMElements();
+    this.loadCalibration();
     this.setupEventListeners();
+    this.checkFirstTimeTutorial();
   }
 
   initDOMElements() {
@@ -47,6 +61,7 @@ export class GestureUI {
       calibrationBtn: document.getElementById('btn-open-calibration'),
       calibrationModal: document.getElementById('calibration-modal'),
       closeCalibrationBtn: document.getElementById('btn-close-calibration'),
+      selectCalibMode: document.getElementById('select-calib-mode'),
       sliderSwipeSens: document.getElementById('slider-swipe-sens'),
       valSwipeSens: document.getElementById('val-swipe-sens'),
       sliderPinchSens: document.getElementById('slider-pinch-sens'),
@@ -54,17 +69,136 @@ export class GestureUI {
       sliderReleaseSens: document.getElementById('slider-release-sens'),
       valReleaseSens: document.getElementById('val-release-sens'),
       chkMirror: document.getElementById('chk-camera-mirror'),
+      btnResetCalibration: document.getElementById('btn-reset-calibration'),
+      btnSaveCalibration: document.getElementById('btn-save-calibration'),
 
       // Tutorial Modal
       tutorialBtn: document.getElementById('btn-open-tutorial'),
       tutorialModal: document.getElementById('tutorial-modal'),
       closeTutorialBtn: document.getElementById('btn-close-tutorial'),
-      startPlayingBtn: document.getElementById('btn-tutorial-start')
+      tutorialSkipBtn: document.getElementById('btn-tutorial-skip'),
+      startPlayingBtn: document.getElementById('btn-tutorial-start'),
+      chkDontShowTutorial: document.getElementById('chk-dont-show-tutorial')
     };
 
-    if (this.elements.board) {
+    if (this.elements.board && this.gestureController) {
       this.gestureController.setBoardElement(this.elements.board);
     }
+  }
+
+  loadCalibration() {
+    let saved = null;
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const raw = localStorage.getItem(STORAGE_KEY_CALIBRATION);
+        if (raw) saved = JSON.parse(raw);
+      }
+    } catch (e) {
+      console.warn('Could not read calibration from localStorage:', e);
+    }
+
+    const config = Object.assign({}, DEFAULT_CALIBRATION, saved || {});
+
+    // Apply values to UI elements
+    if (this.elements.sliderSwipeSens) {
+      this.elements.sliderSwipeSens.value = config.swipeThreshold;
+      if (this.elements.valSwipeSens) this.elements.valSwipeSens.textContent = Number(config.swipeThreshold).toFixed(2);
+    }
+    if (this.elements.sliderPinchSens) {
+      this.elements.sliderPinchSens.value = config.pinchThreshold;
+      if (this.elements.valPinchSens) this.elements.valPinchSens.textContent = Number(config.pinchThreshold).toFixed(3);
+    }
+    if (this.elements.sliderReleaseSens) {
+      this.elements.sliderReleaseSens.value = config.releaseThreshold;
+      if (this.elements.valReleaseSens) this.elements.valReleaseSens.textContent = Number(config.releaseThreshold).toFixed(3);
+    }
+    if (this.elements.chkMirror) {
+      this.elements.chkMirror.checked = config.mirrorX;
+    }
+    if (this.elements.selectCalibMode) {
+      this.elements.selectCalibMode.value = config.mode || 'OFF';
+    }
+
+    // Apply immediately to gesture controller
+    if (this.gestureController) {
+      this.gestureController.updateConfig({
+        swipeThreshold: parseFloat(config.swipeThreshold),
+        pinchThreshold: parseFloat(config.pinchThreshold),
+        releaseThreshold: parseFloat(config.releaseThreshold),
+        mirrorX: Boolean(config.mirrorX)
+      });
+    }
+
+    // Apply mirror styling to video and canvas
+    const isMirrored = Boolean(config.mirrorX);
+    if (this.elements.video) this.elements.video.style.transform = isMirrored ? 'scaleX(-1)' : 'none';
+    if (this.elements.canvas) this.elements.canvas.style.transform = isMirrored ? 'scaleX(-1)' : 'none';
+  }
+
+  saveCalibration() {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const payload = {
+          swipeThreshold: parseFloat(this.elements.sliderSwipeSens ? this.elements.sliderSwipeSens.value : DEFAULT_CALIBRATION.swipeThreshold),
+          pinchThreshold: parseFloat(this.elements.sliderPinchSens ? this.elements.sliderPinchSens.value : DEFAULT_CALIBRATION.pinchThreshold),
+          releaseThreshold: parseFloat(this.elements.sliderReleaseSens ? this.elements.sliderReleaseSens.value : DEFAULT_CALIBRATION.releaseThreshold),
+          mirrorX: this.elements.chkMirror ? this.elements.chkMirror.checked : true,
+          mode: this.gestureController ? this.gestureController.mode : 'OFF'
+        };
+        localStorage.setItem(STORAGE_KEY_CALIBRATION, JSON.stringify(payload));
+      }
+    } catch (e) {
+      console.warn('Could not save calibration to localStorage:', e);
+    }
+  }
+
+  resetCalibrationToDefaults() {
+    if (this.elements.sliderSwipeSens) {
+      this.elements.sliderSwipeSens.value = DEFAULT_CALIBRATION.swipeThreshold;
+      if (this.elements.valSwipeSens) this.elements.valSwipeSens.textContent = DEFAULT_CALIBRATION.swipeThreshold.toFixed(2);
+    }
+    if (this.elements.sliderPinchSens) {
+      this.elements.sliderPinchSens.value = DEFAULT_CALIBRATION.pinchThreshold;
+      if (this.elements.valPinchSens) this.elements.valPinchSens.textContent = DEFAULT_CALIBRATION.pinchThreshold.toFixed(3);
+    }
+    if (this.elements.sliderReleaseSens) {
+      this.elements.sliderReleaseSens.value = DEFAULT_CALIBRATION.releaseThreshold;
+      if (this.elements.valReleaseSens) this.elements.valReleaseSens.textContent = DEFAULT_CALIBRATION.releaseThreshold.toFixed(3);
+    }
+    if (this.elements.chkMirror) {
+      this.elements.chkMirror.checked = DEFAULT_CALIBRATION.mirrorX;
+    }
+    if (this.elements.selectCalibMode) {
+      this.elements.selectCalibMode.value = 'OFF';
+    }
+
+    if (this.gestureController) {
+      this.gestureController.updateConfig({
+        swipeThreshold: DEFAULT_CALIBRATION.swipeThreshold,
+        pinchThreshold: DEFAULT_CALIBRATION.pinchThreshold,
+        releaseThreshold: DEFAULT_CALIBRATION.releaseThreshold,
+        mirrorX: DEFAULT_CALIBRATION.mirrorX
+      });
+    }
+
+    if (this.elements.video) this.elements.video.style.transform = 'scaleX(-1)';
+    if (this.elements.canvas) this.elements.canvas.style.transform = 'scaleX(-1)';
+
+    this.switchMode('OFF');
+    this.saveCalibration();
+    this.showToast('Calibration reset to defaults.', 'info');
+  }
+
+  checkFirstTimeTutorial() {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const seen = localStorage.getItem(STORAGE_KEY_TUTORIAL_SEEN);
+        if (!seen) {
+          // Open tutorial on first visit
+          setTimeout(() => this.openTutorial(), 600);
+        }
+      }
+    } catch (e) {}
   }
 
   setupEventListeners() {
@@ -93,6 +227,23 @@ export class GestureUI {
     if (this.elements.closeCalibrationBtn) {
       this.elements.closeCalibrationBtn.addEventListener('click', () => this.closeCalibration());
     }
+    if (this.elements.btnSaveCalibration) {
+      this.elements.btnSaveCalibration.addEventListener('click', () => {
+        this.saveCalibration();
+        this.closeCalibration();
+        this.showToast('Calibration saved!', 'success');
+      });
+    }
+    if (this.elements.btnResetCalibration) {
+      this.elements.btnResetCalibration.addEventListener('click', () => {
+        this.resetCalibrationToDefaults();
+      });
+    }
+    if (this.elements.selectCalibMode) {
+      this.elements.selectCalibMode.addEventListener('change', (e) => {
+        this.switchMode(e.target.value);
+      });
+    }
 
     // Tutorial modal triggers
     if (this.elements.tutorialBtn) {
@@ -101,32 +252,38 @@ export class GestureUI {
     if (this.elements.closeTutorialBtn) {
       this.elements.closeTutorialBtn.addEventListener('click', () => this.closeTutorial());
     }
+    if (this.elements.tutorialSkipBtn) {
+      this.elements.tutorialSkipBtn.addEventListener('click', () => this.closeTutorial());
+    }
     if (this.elements.startPlayingBtn) {
       this.elements.startPlayingBtn.addEventListener('click', () => this.closeTutorial());
     }
 
-    // Calibration sliders
+    // Calibration sliders (take effect immediately)
     if (this.elements.sliderSwipeSens) {
       this.elements.sliderSwipeSens.addEventListener('input', (e) => {
         const val = parseFloat(e.target.value);
-        this.elements.valSwipeSens.textContent = val.toFixed(2);
+        if (this.elements.valSwipeSens) this.elements.valSwipeSens.textContent = val.toFixed(2);
         this.gestureController.updateConfig({ swipeThreshold: val });
+        this.saveCalibration();
       });
     }
 
     if (this.elements.sliderPinchSens) {
       this.elements.sliderPinchSens.addEventListener('input', (e) => {
         const val = parseFloat(e.target.value);
-        this.elements.valPinchSens.textContent = val.toFixed(3);
+        if (this.elements.valPinchSens) this.elements.valPinchSens.textContent = val.toFixed(3);
         this.gestureController.updateConfig({ pinchThreshold: val });
+        this.saveCalibration();
       });
     }
 
     if (this.elements.sliderReleaseSens) {
       this.elements.sliderReleaseSens.addEventListener('input', (e) => {
         const val = parseFloat(e.target.value);
-        this.elements.valReleaseSens.textContent = val.toFixed(3);
+        if (this.elements.valReleaseSens) this.elements.valReleaseSens.textContent = val.toFixed(3);
         this.gestureController.updateConfig({ releaseThreshold: val });
+        this.saveCalibration();
       });
     }
 
@@ -140,6 +297,7 @@ export class GestureUI {
         if (this.elements.canvas) {
           this.elements.canvas.style.transform = mirrored ? 'scaleX(-1)' : 'none';
         }
+        this.saveCalibration();
       });
     }
 
@@ -190,7 +348,7 @@ export class GestureUI {
       this.cameraManager.stopCamera();
       this.elements.cameraToggleBtn.innerHTML = '<span>📷</span> Enable Camera';
       this.elements.cameraToggleBtn.classList.remove('active-btn');
-      this.updateTrackingStatus('Camera off');
+      this.updateTrackingStatus('Camera disabled');
       this.hideVirtualCursor();
       this.showToast('Camera turned off.', 'info');
     } else {
@@ -199,7 +357,7 @@ export class GestureUI {
       if (success) {
         this.elements.cameraToggleBtn.innerHTML = '<span>🛑</span> Disable Camera';
         this.elements.cameraToggleBtn.classList.add('active-btn');
-        this.updateTrackingStatus('Waiting');
+        this.updateTrackingStatus('Waiting for hand');
         this.showToast('Camera active. Hold hand in view.', 'success');
 
         // Start HandTracker
@@ -214,25 +372,30 @@ export class GestureUI {
   switchMode(mode) {
     this.gestureController.setMode(mode);
 
-    // Update buttons
+    // Update buttons in side panel
     [this.elements.modeOffBtn, this.elements.modeABtn, this.elements.modeBBtn].forEach(b => {
       if (b) b.classList.remove('active-mode');
     });
 
-    if (mode === 'OFF' && this.elements.modeOffBtn) {
-      this.elements.modeOffBtn.classList.add('active-mode');
+    // Sync calibration select dropdown
+    if (this.elements.selectCalibMode && this.elements.selectCalibMode.value !== mode) {
+      this.elements.selectCalibMode.value = mode;
+    }
+
+    if (mode === 'OFF') {
+      if (this.elements.modeOffBtn) this.elements.modeOffBtn.classList.add('active-mode');
       this.hideVirtualCursor();
-    } else if (mode === 'MODE_A' && this.elements.modeABtn) {
-      this.elements.modeABtn.classList.add('active-mode');
+    } else if (mode === 'MODE_A') {
+      if (this.elements.modeABtn) this.elements.modeABtn.classList.add('active-mode');
       this.showToast('Mode A Active: Point & swipe index finger to move tiles.', 'info');
-      // Prompt camera enable if not active
       this.checkCameraPrompt();
-    } else if (mode === 'MODE_B' && this.elements.modeBBtn) {
-      this.elements.modeBBtn.classList.add('active-mode');
+    } else if (mode === 'MODE_B') {
+      if (this.elements.modeBBtn) this.elements.modeBBtn.classList.add('active-mode');
       this.showToast('Mode B Active: Pinch tile and drag to empty cell.', 'info');
-      // Prompt camera enable if not active
       this.checkCameraPrompt();
     }
+
+    this.saveCalibration();
   }
 
   checkCameraPrompt() {
@@ -321,7 +484,7 @@ export class GestureUI {
 
     setTimeout(() => {
       if (this.cameraManager.isActive && this.handTracker.hasHand) {
-        this.updateTrackingStatus('Tracking');
+        this.updateTrackingStatus('Hand detected');
       }
     }, 450);
   }
@@ -366,7 +529,7 @@ export class GestureUI {
 
     setTimeout(() => {
       if (this.cameraManager.isActive && this.handTracker.hasHand) {
-        this.updateTrackingStatus('Tracking');
+        this.updateTrackingStatus('Hand detected');
       }
     }, 350);
   }
@@ -444,6 +607,12 @@ export class GestureUI {
   closeTutorial() {
     if (this.elements.tutorialModal) {
       this.elements.tutorialModal.classList.remove('open');
+    }
+    // Save dismissal preference
+    if (this.elements.chkDontShowTutorial && this.elements.chkDontShowTutorial.checked) {
+      try {
+        localStorage.setItem(STORAGE_KEY_TUTORIAL_SEEN, 'true');
+      } catch (e) {}
     }
   }
 }

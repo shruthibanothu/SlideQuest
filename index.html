@@ -30,6 +30,11 @@
           <span class="stat-label">MOVES</span>
           <span id="stat-moves" class="stat-value">0</span>
         </div>
+        <div class="stat-pill">
+          <span class="stat-icon">🏆</span>
+          <span class="stat-label">BEST</span>
+          <span id="stat-best" class="stat-value">--</span>
+        </div>
       </div>
 
       <!-- Game Controls Toolbar -->
@@ -133,10 +138,10 @@
         <!-- Gesture Quick Instructions Card -->
         <div class="gesture-instructions-card">
           <div class="card-instruction">
-            <strong>Mode A (Swipe):</strong> Point with your index finger and flick UP, DOWN, LEFT, or RIGHT to slide a tile into the empty space.
+            <strong>Mode A (Swipe):</strong> Point with your index finger and flick UP, DOWN, LEFT, or RIGHT to slide a tile into the empty space. Return to neutral before next swipe.
           </div>
           <div class="card-instruction">
-            <strong>Mode B (Pinch & Drag):</strong> Hover over a tile, pinch your index and thumb together to grab, move to the empty cell, and open your fingers to drop!
+            <strong>Mode B (Pinch & Drag):</strong> Hover over a tile, pinch index & thumb together, drag to the empty cell, and open fingers to place!
           </div>
         </div>
       </aside>
@@ -163,15 +168,24 @@
           <button id="btn-close-calibration" class="modal-close">&times;</button>
         </div>
         <div class="modal-body">
-          <p class="modal-intro">Fine-tune tracking thresholds to fit your webcam distance and lighting.</p>
+          <p class="modal-intro">Fine-tune tracking thresholds to fit your webcam distance and lighting. Settings save automatically.</p>
           
+          <div class="form-row">
+            <label for="select-calib-mode">Active Gesture Mode</label>
+            <select id="select-calib-mode" class="game-select">
+              <option value="OFF">Disabled (Normal Mouse/Keyboard)</option>
+              <option value="MODE_A">Mode A (Directional Swipes)</option>
+              <option value="MODE_B">Mode B (Pinch & Drag)</option>
+            </select>
+          </div>
+
           <div class="form-row">
             <label for="slider-swipe-sens">
               Mode A Swipe Threshold
               <span id="val-swipe-sens" class="val-tag">0.11</span>
             </label>
             <input type="range" id="slider-swipe-sens" min="0.05" max="0.25" step="0.01" value="0.11">
-            <span class="hint-text">Lower = easier to trigger swipes; Higher = rejects subtle motions.</span>
+            <span class="hint-text">Lower = more sensitive flicks; Higher = rejects subtle motions.</span>
           </div>
 
           <div class="form-row">
@@ -196,6 +210,15 @@
             <input type="checkbox" id="chk-camera-mirror" checked>
             <label for="chk-camera-mirror">Mirror Camera View (Front-Facing Selfie Mode)</label>
           </div>
+
+          <div class="modal-actions-split">
+            <button id="btn-reset-calibration" class="tool-btn" title="Restore default calibration values">
+              🔄 Reset to Defaults
+            </button>
+            <button id="btn-save-calibration" class="tool-btn primary">
+              ✓ Done
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -204,40 +227,58 @@
     <div id="tutorial-modal" class="modal-overlay">
       <div class="modal-card tutorial-card">
         <div class="modal-header">
-          <h3>🎮 SlideQuest Hand Gesture Guide</h3>
+          <h3>🎮 SlideQuest Guide & Controls</h3>
           <button id="btn-close-tutorial" class="modal-close">&times;</button>
         </div>
         <div class="modal-body tutorial-body">
           <div class="tutorial-grid">
             <div class="tutorial-step">
               <div class="step-badge">1</div>
-              <h4>Enable Camera</h4>
-              <p>Click <strong>Enable Camera</strong>. Your browser will ask for webcam permission. Video is processed purely in your browser—no video data is ever saved or sent over the network.</p>
+              <h4>1. How to Play the Sliding Puzzle</h4>
+              <p>Reorder the scrambled tiles in numerical sequence from 1 to the end, leaving the bottom-right space empty. Only tiles adjacent to the empty cell can move.</p>
             </div>
 
             <div class="tutorial-step">
               <div class="step-badge">2</div>
-              <h4>Mode A: Directional Swipes</h4>
-              <p>Extend your index finger. Quickly flick your finger in the direction you want the tile to slide into the empty spot. Return to neutral before making another move.</p>
-              <div class="demo-diagram">👆 ➡️ 🎯</div>
+              <h4>2. Keyboard & Touch Controls</h4>
+              <p>Click or tap any tile adjacent to the empty space to slide it. You can also use <strong>Arrow Keys</strong> or <strong>WASD</strong> to shift tiles into the empty space.</p>
             </div>
 
             <div class="tutorial-step">
               <div class="step-badge">3</div>
-              <h4>Mode B: Pinch & Drag</h4>
-              <p>Position your fingertip cursor over an adjacent tile. Pinch your thumb and index together to grab. Drag to the glowing empty space and release your fingers to drop.</p>
-              <div class="demo-diagram">👌 🟦 ➡️ ⬛</div>
+              <h4>3. Enable Camera</h4>
+              <p>Click <strong>Enable Camera</strong>. Video is processed purely in your browser in volatile memory—no footage is ever uploaded or saved.</p>
             </div>
 
             <div class="tutorial-step">
               <div class="step-badge">4</div>
-              <h4>Standard Controls</h4>
-              <p>You can seamlessly click or tap tiles, or use arrow keys anytime without interrupting your gesture game!</p>
+              <h4>4. Mode A: Directional Swipes</h4>
+              <p>Point with your index finger. Quickly flick your finger UP, DOWN, LEFT, or RIGHT to slide a tile into the empty space. Return to center before making another move.</p>
+              <div class="demo-diagram">👆 ➡️ 🎯</div>
+            </div>
+
+            <div class="tutorial-step">
+              <div class="step-badge">5</div>
+              <h4>5. Mode B: Pinch & Drag</h4>
+              <p>Hover your index fingertip cursor over a tile. Pinch your thumb and index together to grab, drag over to the glowing empty space, and open fingers to drop.</p>
+              <div class="demo-diagram">👌 🟦 ➡️ ⬛</div>
+            </div>
+
+            <div class="tutorial-step">
+              <div class="step-badge">6</div>
+              <h4>6. Switch Anytime</h4>
+              <p>Switch between Normal, Mode A, and Mode B anytime without losing your puzzle progress! Standard mouse and keyboard controls always remain active.</p>
             </div>
           </div>
 
-          <div class="modal-actions">
-            <button id="btn-tutorial-start" class="tool-btn primary large">Got it! Let's Play</button>
+          <div class="form-row-checkbox tutorial-dont-show">
+            <input type="checkbox" id="chk-dont-show-tutorial">
+            <label for="chk-dont-show-tutorial">Don't show tutorial automatically on launch</label>
+          </div>
+
+          <div class="modal-actions-split">
+            <button id="btn-tutorial-skip" class="tool-btn">Skip</button>
+            <button id="btn-tutorial-start" class="tool-btn primary large">Start Quest!</button>
           </div>
         </div>
       </div>

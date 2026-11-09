@@ -85,10 +85,13 @@ class SlideQuestApp {
     // Stats
     this.statMoves = document.getElementById('stat-moves');
     this.statTime = document.getElementById('stat-time');
+    this.statBest = document.getElementById('stat-best');
     this.victoryModal = document.getElementById('victory-modal');
     this.btnPlayAgain = document.getElementById('btn-play-again');
     this.victoryMoves = document.getElementById('victory-moves');
     this.victoryTime = document.getElementById('victory-time');
+
+    this.updateBestScoreDisplay();
 
     if (this.btnNewGame) {
       this.btnNewGame.addEventListener('click', () => {
@@ -101,6 +104,7 @@ class SlideQuestApp {
       this.selectDifficulty.addEventListener('change', (e) => {
         const size = parseInt(e.target.value, 10);
         this.game.setGridSize(size);
+        this.updateBestScoreDisplay();
         this.audio.playSlide();
       });
     }
@@ -277,8 +281,28 @@ class SlideQuestApp {
     }, 160);
   }
 
+  updateBestScoreDisplay() {
+    if (!this.statBest) return;
+    try {
+      const best = localStorage.getItem(`slidequest_best_${this.game.gridSize}`);
+      this.statBest.textContent = best ? `${best} moves` : '--';
+    } catch (e) {
+      this.statBest.textContent = '--';
+    }
+  }
+
   handleWin(winInfo) {
     this.audio.playSuccess();
+
+    try {
+      const bestKey = `slidequest_best_${this.game.gridSize}`;
+      const currentBest = localStorage.getItem(bestKey);
+      if (!currentBest || winInfo.moveCount < parseInt(currentBest, 10)) {
+        localStorage.setItem(bestKey, winInfo.moveCount);
+        this.updateBestScoreDisplay();
+      }
+    } catch (e) {}
+
     if (this.victoryModal) {
       if (this.victoryMoves) this.victoryMoves.textContent = winInfo.moveCount;
       if (this.victoryTime) {
