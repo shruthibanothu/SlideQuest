@@ -372,9 +372,16 @@ export class GestureUI {
   }
 
   handleStatusNotification(data) {
-    if (data.type === 'swipe_executed' && !data.success) {
+    if (data.type === 'swipe_executed') {
+      if (data.success) {
+        this.showToast(`Swiped ${data.direction}: Move successful!`, 'success');
+      } else {
+        this.audioManager.playError();
+        this.showToast(`Swiped ${data.direction}: Blocked by boundary`, 'warning');
+      }
+    } else if (data.type === 'diagonal_rejected') {
       this.audioManager.playError();
-      this.showToast(`Cannot move ${data.direction}`, 'warning');
+      this.showToast('Diagonal swipe rejected — swipe vertically or horizontally', 'warning');
     }
   }
 
